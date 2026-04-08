@@ -86,21 +86,26 @@ def generate_email_html(articles_with_summaries):
 
     for art in articles_with_summaries:
         summary_text = art['summary'].replace('*', '•').replace('\n', '<br>')
-        html += f"""
-        <div style="background-color: white; border-radius: 8px; overflow: hidden; margin-bottom: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border: 1px solid #ddd;">
-            <img src="{art['image']}" style="width: 100%; height: 200px; object-fit: cover;" alt="Article Image">
-            <div style="padding: 20px;">
-                <h3 style="margin-top: 0; color: #2980b9;">{art['title']}</h3>
-                <p style="font-size: 12px; color: #7f8c8d; margin-bottom: 15px;">Published: {art['date']}</p>
-                <div style="font-size: 14px; line-height: 1.6; color: #34495e;">
-                    {summary_text}
-                </div>
-                <div style="margin-top: 20px;">
-                    <a href="{art['link']}" style="background-color: #2980b9; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">Read Full Article</a>
-                </div>
-            </div>
-        </div>
-        """
+        title = art['title']
+        date = art['date']
+        image = art['image']
+        link = art['link']
+
+        html += (
+            '<div style="background-color: white; border-radius: 8px; overflow: hidden; margin-bottom: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border: 1px solid #ddd;">'
+            f'<img src="{image}" style="width: 100%; height: 200px; object-fit: cover;" alt="Article Image">'
+            '<div style="padding: 20px;">'
+            f'<h3 style="margin-top: 0; color: #2980b9;">{title}</h3>'
+            f'<p style="font-size: 12px; color: #7f8c8d; margin-bottom: 15px;">Published: {date}</p>'
+            '<div style="font-size: 14px; line-height: 1.6; color: #34495e;">'
+            f'{summary_text}'
+            '</div>'
+            '<div style="margin-top: 20px;">'
+            f'<a href="{link}" style="background-color: #2980b9; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">Read Full Article</a>'
+            '</div>'
+            '</div>'
+            '</div>'
+        )
 
     html += "</div>"
     return html
