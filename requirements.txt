@@ -1,0 +1,6 @@
+feedparser
+newspaper3k
+lxml_html_clean
+groq
+python-dotenv
+requests
