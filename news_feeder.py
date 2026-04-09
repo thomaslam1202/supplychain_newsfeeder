@@ -156,7 +156,7 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-recipients = ['chunting.lam@kautex.com','joshua.baker@kautex.com', 'quinn.labay@kautex.com']
+recipients = ['chunting.lam@kautex.com','joshua.baker@kautex.com', 'quinn.labay@kautex.com','adrian.jimenez@kautex.com']
 
 def send_gmail_newsletter(html_content, recipient_list):
 
