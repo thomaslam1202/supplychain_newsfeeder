@@ -179,4 +179,4 @@ def send_gmail_newsletter(html_content, recipient_list):
     except Exception as e:
         print(f"❌ Failed to send via Gmail: {e}")
 
-send_gmail_newsletter(email_body, "joshua.baker@kautex.com")
+send_gmail_newsletter(email_body, recipients)
