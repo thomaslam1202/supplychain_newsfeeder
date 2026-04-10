@@ -17,7 +17,9 @@ GMAIL_APP_PASSWORD = os.getenv('GMAIL_APP_PASSWORD')
 TRUSTED_SENDERS = [
     'chunting.lam@kautex.com','joshua.baker@kautex.com','adrian.jimenez@kautex.com','Tony.Kizzee@kautex.com'
 ]
- 
+#only trigger if sender in trusted_senders with subjet = 'send' and has new url in email body
+
+
 supplyChianDive_rss_url = 'https://www.supplychaindive.com/feeds/news/'
  
 recipients = [
