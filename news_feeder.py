@@ -18,7 +18,6 @@ TRUSTED_SENDER = 'chunting.lam@kautex.com'  # e.g. "yourname@gmail.com"
 
 supplyChianDive_rss_url = 'https://rss.app/feeds/6MAe8sojZPLiftsC.xml'
 
-
 recipients = [
     'chunting.lam@kautex.com',
     'joshua.baker@kautex.com',
@@ -205,9 +204,72 @@ def run_daily_rss_feed():
 # ON-DEMAND EMAIL TRIGGER FLOW
 # ─────────────────────────────────────────────
 
-def extract_urls_from_text(text):
-    """Return all http/https URLs found in a plain-text string."""
-    return re.findall(r'https?://[^\s<>"\']+', text)
+
+# Domains that are almost never article sources — typically appear in signatures
+_SIGNATURE_DOMAIN_BLOCKLIST = {
+    "linkedin.com", "twitter.com", "x.com", "facebook.com",
+    "instagram.com", "youtube.com", "tiktok.com",
+    "maps.google.com", "goo.gl", "bit.ly", "t.co",
+    "mailto:",  # not a domain but catches malformed hits
+}
+
+
+def _is_article_url(url: str) -> bool:
+    """
+    Return True only if the URL looks like a news/blog article rather than
+    a homepage, social-media profile, or generic signature link.
+
+    Heuristics (all must pass):
+      1. Uses http/https scheme.
+      2. Domain is not in the signature blocklist.
+      3. Has a non-trivial path  — at least two path segments with real words,
+         e.g.  /politics/trump-targets-drug-imports   ✓
+               /                                       ✗
+               /about                                  ✗  (single short segment)
+    """
+    from urllib.parse import urlparse
+
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False
+
+    # Must be http/https
+    if parsed.scheme not in ("http", "https"):
+        return False
+
+    # Strip www. for blocklist matching
+    domain = parsed.netloc.lower().lstrip("www.")
+    if any(domain == blocked or domain.endswith("." + blocked)
+           for blocked in _SIGNATURE_DOMAIN_BLOCKLIST):
+        return False
+
+    # Path must have at least two non-empty segments, each with 3+ characters
+    # e.g.  /section/article-slug-here  → ['section', 'article-slug-here'] ✓
+    #        /                           → [] ✗
+    #        /about                      → ['about'] ✗  (only one segment)
+    path_segments = [s for s in parsed.path.strip("/").split("/") if len(s) >= 3]
+    if len(path_segments) < 2:
+        return False
+
+    return True
+
+
+def extract_urls_from_text(text: str):
+    """
+    Return URLs from email body that look like real articles,
+    filtering out homepage links, social profiles, and signature URLs.
+    """
+    raw_urls = re.findall(r'https?://[^\s<>"\')\]]+', text)
+    article_urls = [u for u in raw_urls if _is_article_url(u)]
+
+    if not article_urls:
+        # Fallback: return all URLs so the caller can log a useful warning
+        print("  ⚠️  No article-like URLs found after filtering. Raw URLs were:")
+        for u in raw_urls:
+            print(f"      {u}")
+
+    return article_urls
 
 
 def get_email_body(msg):
