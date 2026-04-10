@@ -1,46 +1,51 @@
 import feedparser
 import os
+import re
+import imaplib
+import email
+from email.header import decode_header
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-load_dotenv()  
+load_dotenv()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GMAIL_ADDRESS = os.getenv("GMAIL_ADDRESS")
 GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
 
+# Only emails from this address will trigger the on-demand flow
+TRUSTED_SENDER = 'chunting.lam@kautex.com'  # e.g. "yourname@gmail.com"
+
 supplyChianDive_rss_url = 'https://rss.app/feeds/6MAe8sojZPLiftsC.xml'
 
-feed = feedparser.parse(supplyChianDive_rss_url)
-selected_articles = []
-today_date = datetime.today().date()
 
-for entry in feed.entries:
-    # Safely try to get a human-readable date string
-    date_str = getattr(entry, 'published', 'No date provided')
+recipients = [
+    'chunting.lam@kautex.com',
+    'joshua.baker@kautex.com',
+    'quinn.labay@kautex.com',
+    'adrian.jimenez@kautex.com',
+]
 
-    selected_articles.append({
-        "title": entry.title,
-        "link": entry.link,
-        "date": date_str,
-        "image": entry.get('media_content', [{}])[0].get('url', ''),
-    })
-
-    # Stop once we have the top 5
-    if len(selected_articles) >= 5:
-        break
+# ─────────────────────────────────────────────
+# SHARED UTILITIES
+# ─────────────────────────────────────────────
 
 from newspaper import Article
+from groq import Groq
+
+client = Groq(api_key=GROQ_API_KEY)
+today_date = datetime.today().date()
+
 
 def get_article_text(url):
     try:
         article = Article(url)
         article.download()
         article.parse()
-        return article.text
+        return article
     except Exception as e:
         print(f"⚠️ Failed to fetch {url}: {e}")
-        return ""
+        return None
 
 
 def clean_article_text(text, max_chars=6000):
@@ -48,35 +53,46 @@ def clean_article_text(text, max_chars=6000):
     text = " ".join(text.split())
     return text[:max_chars]
 
+
 def get_better_image(url, rss_image):
     try:
-        # If RSS image is webp, try to find the 'top_image' from the site
-        if ".webp" in rss_image.lower():
+        if rss_image and ".webp" in rss_image.lower():
             a = Article(url)
             a.download()
             a.parse()
-            # Only use it if it's not another webp
             if a.top_image and ".webp" not in a.top_image.lower():
                 return a.top_image
         return rss_image
     except:
         return rss_image
 
-processed_article = []
 
+def summarize_with_llama(article_text):
+    completion = client.chat.completions.create(
+        model="llama-3.1-8b-instant",
+        messages=[
+            {"role": "system", "content": """You are a professional Supply Chain Analyst.
+Summarize the article into 3 bullet points.
 
-for item in selected_articles:
-    raw_text = get_article_text(item["link"])
-    cleaned_text = clean_article_text(raw_text)
-    img_url = get_better_image(item['link'], item['image'])
+RULES:
+1. Output ONLY the bullet points.
+2. NO introduction (do not say "Here are the points").
+3. NO markdown bolding (do not use **).
+4. Start each point with a relevant Emoji icon based on the topic.
+5. Focus on business impact, risks, and trends
+6. Format the [Topic Title] and [Key Figures/Words] using <b> tags
 
-    processed_article.append({
-        "title": item["title"],
-        "link": item["link"],
-        "text": cleaned_text,
-        "date": item["date"],
-        "image": img_url
-    })
+Example format:
+📦 <b>Market Volatility</b>: Spot rates have surged by <b>52%</b> this quarter.
+⚠️ <b>Labor Risks</b>: Negotiations could impact <b>20,000 workers</b>.
+📈 <b>Strategic Trends</b>: Shippers are moving toward <b>short-term contracts</b>."""},
+            {"role": "user", "content": article_text}
+        ],
+        temperature=0.5,
+        max_tokens=1000
+    )
+    return completion.choices[0].message.content
+
 
 def generate_email_html(articles_with_summaries):
     html = """
@@ -93,76 +109,33 @@ def generate_email_html(articles_with_summaries):
 
         html += (
             '<div style="background-color: white; border-radius: 8px; overflow: hidden; margin-bottom: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border: 1px solid #ddd;">'
-            f'<img src="{image}" style="width: 100%; height: 200px; object-fit: cover;" alt="Article Image">'
-            '<div style="padding: 20px;">'
-            f'<h3 style="margin-top: 0; color: #2980b9;">{title}</h3>'
-            f'<p style="font-size: 12px; color: #7f8c8d; margin-bottom: 15px;">Published: {date}</p>'
-            '<div style="font-size: 14px; line-height: 1.6; color: #34495e;">'
-            f'{summary_text}'
-            '</div>'
-            '<div style="margin-top: 20px;">'
-            f'<a href="{link}" style="background-color: #2980b9; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">Read Full Article</a>'
-            '</div>'
-            '</div>'
-            '</div>'
+            + (f'<img src="{image}" style="width: 100%; height: 200px; object-fit: cover;" alt="Article Image">' if image else '')
+            + '<div style="padding: 20px;">'
+            + f'<h3 style="margin-top: 0; color: #2980b9;">{title}</h3>'
+            + f'<p style="font-size: 12px; color: #7f8c8d; margin-bottom: 15px;">Published: {date}</p>'
+            + '<div style="font-size: 14px; line-height: 1.6; color: #34495e;">'
+            + f'{summary_text}'
+            + '</div>'
+            + '<div style="margin-top: 20px;">'
+            + f'<a href="{link}" style="background-color: #2980b9; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">Read Full Article</a>'
+            + '</div>'
+            + '</div>'
+            + '</div>'
         )
 
     html += "</div>"
     return html
 
-from groq import Groq
-
-client = Groq(api_key=GROQ_API_KEY)
-
-def summarize_with_llama(article_text):
-  completion = client.chat.completions.create(
-      model="llama-3.1-8b-instant",
-      messages=[
-          {"role": "system", "content": """You are a professional Supply Chain Analyst.
-        Summarize the article into 3 bullet points.
-
-        RULES:
-        1. Output ONLY the bullet points.
-        2. NO introduction (do not say "Here are the points").
-        3. NO markdown bolding (do not use **).
-        4. Start each point with a relevant Emoji icon based on the topic.
-        5. Focus on business impact, risks, and trends
-        6. Format the [Topic Title] and [Key Figures/Words] using <b> tags
-
-        Example format:
-        📦 <b>Market Volatility</b>: Spot rates have surged by <b>52%</b> this quarter.
-        ⚠️ <b>Labor Risks</b>: Negotiations could impact <b>20,000 workers</b>.
-        📈 <b>Strategic Trends</b>: Shippers are moving toward <b>short-term contracts</b>."""},
-          {"role": "user", "content": article_text}
-      ], temperature=0.5, max_tokens=1000
-  )
-  return completion.choices[0].message.content
-
-final_result = []
-
-
-for article in processed_article:
-  summary = summarize_with_llama(article["text"])
-  article['summary'] = summary
-  final_result.append(article)
-
-email_body = generate_email_html(final_result)
-
-# Optional: Save it to an .html file to preview it in your browser
-with open("preview.html", "w") as f:
-    f.write(email_body)
 
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-recipients = ['chunting.lam@kautex.com','joshua.baker@kautex.com', 'quinn.labay@kautex.com','adrian.jimenez@kautex.com']
 
-def send_gmail_newsletter(html_content, recipient_list):
-
+def send_gmail_newsletter(html_content, recipient_list, subject=None):
     sender_email = GMAIL_ADDRESS
     app_password = GMAIL_APP_PASSWORD
-    subject = f"[{today_date}] Daily Supply Chain Feed"
+    subject = subject or f"[{today_date}] Daily Supply Chain Feed"
 
     msg = MIMEMultipart()
     msg['From'] = f"DO NOT REPLY <{sender_email}>"
@@ -170,13 +143,218 @@ def send_gmail_newsletter(html_content, recipient_list):
     msg.attach(MIMEText(html_content, 'html'))
 
     try:
-        # Port 465 is the standard for secure Gmail SMTP
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
             server.login(sender_email, app_password)
-            # This sends the email to all 5 people at once
             server.sendmail(sender_email, recipient_list, msg.as_string())
         print("🚀 Gmail Newsletter sent successfully!")
     except Exception as e:
         print(f"❌ Failed to send via Gmail: {e}")
 
-send_gmail_newsletter(email_body, recipients)
+
+# ─────────────────────────────────────────────
+# DAILY RSS FLOW
+# ─────────────────────────────────────────────
+
+def run_daily_rss_feed():
+    print("📰 Running daily RSS feed...")
+
+    feed = feedparser.parse(supplyChianDive_rss_url)
+    selected_articles = []
+
+    for entry in feed.entries:
+        date_str = getattr(entry, 'published', 'No date provided')
+        selected_articles.append({
+            "title": entry.title,
+            "link": entry.link,
+            "date": date_str,
+            "image": entry.get('media_content', [{}])[0].get('url', ''),
+        })
+        if len(selected_articles) >= 5:
+            break
+
+    processed_articles = []
+    for item in selected_articles:
+        parsed = get_article_text(item["link"])
+        if not parsed:
+            continue
+        cleaned_text = clean_article_text(parsed.text)
+        img_url = get_better_image(item['link'], item['image'])
+        processed_articles.append({
+            "title": item["title"],
+            "link": item["link"],
+            "text": cleaned_text,
+            "date": item["date"],
+            "image": img_url,
+        })
+
+    final_result = []
+    for article in processed_articles:
+        summary = summarize_with_llama(article["text"])
+        article['summary'] = summary
+        final_result.append(article)
+
+    email_body = generate_email_html(final_result)
+
+    with open("preview.html", "w") as f:
+        f.write(email_body)
+
+    send_gmail_newsletter(email_body, 'chunting.lam@kautex.com')
+
+
+# ─────────────────────────────────────────────
+# ON-DEMAND EMAIL TRIGGER FLOW
+# ─────────────────────────────────────────────
+
+def extract_urls_from_text(text):
+    """Return all http/https URLs found in a plain-text string."""
+    return re.findall(r'https?://[^\s<>"\']+', text)
+
+
+def get_email_body(msg):
+    """Extract plain-text or HTML body from an email.Message object."""
+    body = ""
+    if msg.is_multipart():
+        for part in msg.walk():
+            content_type = part.get_content_type()
+            content_disposition = str(part.get("Content-Disposition", ""))
+            if "attachment" in content_disposition:
+                continue
+            if content_type == "text/plain":
+                charset = part.get_content_charset() or "utf-8"
+                body += part.get_payload(decode=True).decode(charset, errors="replace")
+            elif content_type == "text/html" and not body:
+                # Fallback to HTML body only if no plain text found
+                charset = part.get_content_charset() or "utf-8"
+                body += part.get_payload(decode=True).decode(charset, errors="replace")
+    else:
+        charset = msg.get_content_charset() or "utf-8"
+        body = msg.get_payload(decode=True).decode(charset, errors="replace")
+    return body
+
+
+def fetch_trigger_emails():
+    """
+    Connect to Gmail via IMAP, find unread emails from TRUSTED_SENDER
+    with subject 'send' (case-insensitive), and return a list of URL lists.
+    Marks processed emails as read so they are not re-processed.
+    """
+    if not TRUSTED_SENDER:
+        print("⚠️ TRUSTED_SENDER not set in .env — skipping inbox check.")
+        return []
+
+    trigger_url_batches = []
+
+    try:
+        mail = imaplib.IMAP4_SSL("imap.gmail.com")
+        mail.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
+        mail.select("inbox")
+
+        # Search for unread emails from the trusted sender
+        search_criteria = f'(UNSEEN FROM "{TRUSTED_SENDER}" SUBJECT "send")'
+        status, data = mail.search(None, search_criteria)
+
+        if status != "OK" or not data[0]:
+            print("📭 No trigger emails found.")
+            mail.logout()
+            return []
+
+        email_ids = data[0].split()
+        print(f"📬 Found {len(email_ids)} trigger email(s).")
+
+        for eid in email_ids:
+            # Fetch the full email
+            _, msg_data = mail.fetch(eid, "(RFC822)")
+            raw_email = msg_data[0][1]
+            msg = email.message_from_bytes(raw_email)
+
+            body = get_email_body(msg)
+            urls = extract_urls_from_text(body)
+
+            if urls:
+                print(f"  🔗 Extracted URLs: {urls}")
+                trigger_url_batches.append(urls)
+            else:
+                print(f"  ⚠️ No URLs found in trigger email — skipping.")
+
+            # Mark email as read so it won't be processed again
+            mail.store(eid, "+FLAGS", "\\Seen")
+
+        mail.logout()
+
+    except Exception as e:
+        print(f"❌ IMAP error: {e}")
+
+    return trigger_url_batches
+
+
+def process_url_batch(urls):
+    """Fetch, summarize, and email articles for a list of URLs."""
+    processed_articles = []
+
+    for url in urls:
+        print(f"  📄 Fetching: {url}")
+        parsed = get_article_text(url)
+        if not parsed:
+            print(f"  ⚠️ Skipping {url} — could not parse.")
+            continue
+
+        # Title
+        title = parsed.title or "Untitled Article"
+
+        # Published date — newspaper3k exposes publish_date
+        pub_date = "Unknown date"
+        if parsed.publish_date:
+            pub_date = parsed.publish_date.strftime("%B %d, %Y")
+
+        # Body text
+        cleaned_text = clean_article_text(parsed.text)
+        if not cleaned_text:
+            print(f"  ⚠️ Skipping {url} — empty body.")
+            continue
+
+        # Image
+        image = parsed.top_image or ""
+        if image and ".webp" in image.lower():
+            image = ""  # drop webp images that won't render in email
+
+        processed_articles.append({
+            "title": title,
+            "link": url,
+            "text": cleaned_text,
+            "date": pub_date,
+            "image": image,
+        })
+
+    if not processed_articles:
+        print("  ⚠️ No valid articles to summarize.")
+        return
+
+    # Summarize
+    for article in processed_articles:
+        article['summary'] = summarize_with_llama(article["text"])
+
+    email_body = generate_email_html(processed_articles)
+    subject = f"[{today_date}] On-Demand Supply Chain Summary"
+    send_gmail_newsletter(email_body, 'chunting.lam@kautex.com', subject=subject)
+
+
+def run_on_demand_trigger():
+    """Check inbox for trigger emails and process any found URL batches."""
+    print("📥 Checking inbox for on-demand trigger emails...")
+    url_batches = fetch_trigger_emails()
+
+    for i, urls in enumerate(url_batches, start=1):
+        print(f"\n🔄 Processing batch {i}/{len(url_batches)} ({len(urls)} URL(s))...")
+        process_url_batch(urls)
+
+
+# ─────────────────────────────────────────────
+# ENTRY POINT
+# ─────────────────────────────────────────────
+
+if __name__ == "__main__":
+    # 1. Always run the daily RSS digest
+    run_daily_rss_feed()
+
+    # 2. Also check for any on-demand trigger emails
+    run_on_demand_trigger()
