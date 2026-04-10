@@ -13,7 +13,10 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GMAIL_ADDRESS = 'supplychaindigest.daily@gmail.com'
 GMAIL_APP_PASSWORD = os.getenv('GMAIL_APP_PASSWORD')
 
-TRUSTED_SENDER = 'chunting.lam@kautex.com'
+# ── Now supports multiple trusted senders ──────────────────────────────────
+TRUSTED_SENDERS = [
+    'chunting.lam@kautex.com','joshua.baker@kautex.com','adrian.jimenez@kautex.com','Tony.Kizzee@kautex.com'
+]
  
 supplyChianDive_rss_url = 'https://www.supplychaindive.com/feeds/news/'
  
@@ -270,17 +273,6 @@ def _try_parse(raw: str):
  
  
 def extract_publish_date(article_obj, url: str = "") -> str:
-    """
-    Try every available signal to find the article's published date.
-    Returns a formatted string like "April 10, 2026", or "Unknown date".
- 
-    Strategy order (most → least reliable):
-      1. newspaper3k native publish_date
-      2. JSON-LD  datePublished / dateCreated  (in article HTML or stashed soup)
-      3. Extended meta-tag list
-      4. <time> elements (datetime attr or inner text)
-      5. URL path pattern  e.g. /2026/04/10/  or  -2026-04-10-
-    """
     from dateutil import parser as dp
     import json, re as _re
  
@@ -291,13 +283,11 @@ def extract_publish_date(article_obj, url: str = "") -> str:
     if native:
         return native.strftime("%B %d, %Y")
  
-    # Gather a BeautifulSoup object from whatever source we have
     soup = None
     stashed = getattr(article_obj, "_soup", None)
     if stashed is not None:
         soup = stashed
     else:
-        # newspaper3k stores the raw HTML — parse it ourselves
         raw_html = getattr(article_obj, "html", "") or ""
         if raw_html:
             try:
@@ -311,10 +301,8 @@ def extract_publish_date(article_obj, url: str = "") -> str:
         for script in soup.find_all("script", type="application/ld+json"):
             try:
                 data = json.loads(script.string or "")
-                # data may be a list or a single object
                 items = data if isinstance(data, list) else [data]
                 for item in items:
-                    # Unwrap @graph arrays
                     if "@graph" in item:
                         items += item["@graph"]
                     for key in ("datePublished", "dateCreated", "dateModified"):
@@ -326,7 +314,7 @@ def extract_publish_date(article_obj, url: str = "") -> str:
             except Exception:
                 pass
  
-        # ── 3. Meta tags (comprehensive list) ────────────────────────────
+        # ── 3. Meta tags ────────────────────────────────────────────────────
         meta_selectors = [
             {"property": "article:published_time"},
             {"property": "og:article:published_time"},
@@ -347,7 +335,6 @@ def extract_publish_date(article_obj, url: str = "") -> str:
                 if dt:
                     return dt.strftime("%B %d, %Y")
  
-        # Also check plain <span> / <div> with itemprop
         for tag in soup.find_all(attrs={"itemprop": ["datePublished", "dateCreated"]}):
             raw = tag.get("content") or tag.get("datetime") or tag.get_text(strip=True)
             dt = _try_parse(raw)
@@ -362,11 +349,10 @@ def extract_publish_date(article_obj, url: str = "") -> str:
                 return dt.strftime("%B %d, %Y")
  
     # ── 5. URL path pattern ───────────────────────────────────────────────
-    # Matches  /2026/04/10/  or  -2026-04-10  or  20260410
     patterns = [
-        r'/(\d{4})/(\d{1,2})/(\d{1,2})/',   # /2026/04/10/
-        r'[/-](\d{4})-(\d{2})-(\d{2})(?:[^0-9]|$)',  # -2026-04-10
-        r'(\d{4})(\d{2})(\d{2})',            # 20260410 (less specific)
+        r'/(\d{4})/(\d{1,2})/(\d{1,2})/',
+        r'[/-](\d{4})-(\d{2})-(\d{2})(?:[^0-9]|$)',
+        r'(\d{4})(\d{2})(\d{2})',
     ]
     for pat in patterns:
         m = _re.search(pat, url)
@@ -380,7 +366,7 @@ def extract_publish_date(article_obj, url: str = "") -> str:
                 pass
  
     return "Unknown date"
- 
+
 def generate_email_html(articles_with_summaries):
     html = (
         "<div style=\"font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;"
@@ -401,7 +387,6 @@ def generate_email_html(articles_with_summaries):
             if image else ''
         )
  
-        # Favicon sits beside the source name label
         if favicon_url:
             source_block = (
                 f'<img src="{favicon_url}" width="14" height="14" '
@@ -558,55 +543,67 @@ def get_email_body(msg):
         charset = msg.get_content_charset() or "utf-8"
         body = msg.get_payload(decode=True).decode(charset, errors="replace")
     return body
- 
- 
-def fetch_trigger_emails():
-    if not TRUSTED_SENDER:
-        print("⚠️ TRUSTED_SENDER not set — skipping inbox check.")
+
+
+def fetch_all_trigger_urls() -> list[str]:
+    """
+    Connects to Gmail once, fetches ALL unseen emails from any TRUSTED_SENDER,
+    collects every article URL across all of them (deduped), marks them all as
+    read, then returns the flat list of unique URLs.
+    """
+    if not TRUSTED_SENDERS:
+        print("⚠️ TRUSTED_SENDERS is empty — skipping inbox check.")
         return []
- 
-    trigger_url_batches = []
+
+    all_urls: list[str] = []
+    seen_urls: set[str] = set()
+
     try:
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
         mail.select("inbox")
- 
-        search_criteria = f'(UNSEEN FROM "{TRUSTED_SENDER}" SUBJECT "send")'
-        status, data = mail.search(None, search_criteria)
- 
-        if status != "OK" or not data[0]:
-            print("📭 No trigger emails found.")
-            mail.logout()
-            return []
- 
-        email_ids = data[0].split()
-        print(f"📬 Found {len(email_ids)} trigger email(s).")
- 
-        for eid in email_ids:
-            _, msg_data = mail.fetch(eid, "(RFC822)")
-            raw_email   = msg_data[0][1]
-            msg         = email.message_from_bytes(raw_email)
- 
-            body = get_email_body(msg)
-            urls = extract_urls_from_text(body)
- 
-            if urls:
-                print(f"  🔗 Extracted URLs: {urls}")
-                trigger_url_batches.append(urls)
-            else:
-                print("  ⚠️ No URLs found in trigger email — skipping.")
- 
-            mail.store(eid, "+FLAGS", "\\Seen")
- 
+
+        for sender in TRUSTED_SENDERS:
+            search_criteria = f'(UNSEEN FROM "{sender}" SUBJECT "send")'
+            status, data = mail.search(None, search_criteria)
+
+            if status != "OK" or not data[0]:
+                print(f"📭 No trigger emails from {sender}.")
+                continue
+
+            email_ids = data[0].split()
+            print(f"📬 Found {len(email_ids)} trigger email(s) from {sender}.")
+
+            for eid in email_ids:
+                _, msg_data = mail.fetch(eid, "(RFC822)")
+                raw_email   = msg_data[0][1]
+                msg         = email.message_from_bytes(raw_email)
+
+                body = get_email_body(msg)
+                urls = extract_urls_from_text(body)
+
+                new_urls = [u for u in urls if u not in seen_urls]
+                if new_urls:
+                    print(f"  🔗 {len(new_urls)} new URL(s) extracted from email {eid.decode()}.")
+                    for u in new_urls:
+                        seen_urls.add(u)
+                        all_urls.append(u)
+                else:
+                    print(f"  ⚠️ No new URLs in email {eid.decode()} — skipping.")
+
+                # Mark as read regardless
+                mail.store(eid, "+FLAGS", "\\Seen")
+
         mail.logout()
- 
+
     except Exception as e:
         print(f"❌ IMAP error: {e}")
- 
-    return trigger_url_batches
- 
- 
-def process_url_batch(urls):
+
+    return all_urls
+
+
+def process_url_batch(urls: list[str]):
+    """Fetch, summarise, and send ONE combined email for all provided URLs."""
     processed_articles = []
  
     for url in urls:
@@ -617,15 +614,14 @@ def process_url_batch(urls):
             continue
  
         title        = parsed.title or "Untitled Article"
-        pub_date = extract_publish_date(parsed, url)
- 
+        pub_date     = extract_publish_date(parsed, url)
         cleaned_text = clean_article_text(parsed.text)
+
         if not cleaned_text:
             print(f"  ⚠️ Skipping {url} — empty body.")
             continue
  
         image = extract_best_image(parsed)
- 
         processed_articles.append({
             "title": title,
             "link":  url,
@@ -635,7 +631,7 @@ def process_url_batch(urls):
         })
  
     if not processed_articles:
-        print("  ⚠️ No valid articles to summarize.")
+        print("  ⚠️ No valid articles to summarize — no email sent.")
         return
  
     for article in processed_articles:
@@ -643,15 +639,24 @@ def process_url_batch(urls):
  
     email_body = generate_email_html(processed_articles)
     subject    = f"[{today_date}] On-Demand Supply Chain Summary"
+    print(f"\n📧 Sending one combined email with {len(processed_articles)} article(s)...")
     send_gmail_newsletter(email_body, recipients, subject=subject)
- 
- 
+
+
 def run_on_demand_trigger():
+    """
+    Collect ALL URLs from ALL unseen trigger emails across every trusted sender,
+    then send exactly ONE combined newsletter email.
+    """
     print("📥 Checking inbox for on-demand trigger emails...")
-    url_batches = fetch_trigger_emails()
-    for i, urls in enumerate(url_batches, start=1):
-        print(f"\n🔄 Processing batch {i}/{len(url_batches)} ({len(urls)} URL(s))...")
-        process_url_batch(urls)
+    all_urls = fetch_all_trigger_urls()
+
+    if not all_urls:
+        print("📭 No URLs found across any trigger emails — nothing to send.")
+        return
+
+    print(f"\n🔄 Processing {len(all_urls)} unique URL(s) from all trigger emails...")
+    process_url_batch(all_urls)
  
  
 # ─────────────────────────────────────────────
