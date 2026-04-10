@@ -502,7 +502,7 @@ def run_daily_rss_feed():
     with open("preview.html", "w", encoding="utf-8") as f:
         f.write(email_body)
  
-    send_gmail_newsletter(email_body, 'chunting.lam@kautex.com')
+    send_gmail_newsletter(email_body, recipients)
  
  
 # ─────────────────────────────────────────────
@@ -643,7 +643,7 @@ def process_url_batch(urls):
  
     email_body = generate_email_html(processed_articles)
     subject    = f"[{today_date}] On-Demand Supply Chain Summary"
-    send_gmail_newsletter(email_body, 'chunting.lam@kautex.com', subject=subject)
+    send_gmail_newsletter(email_body, recipients, subject=subject)
  
  
 def run_on_demand_trigger():
