@@ -29,21 +29,54 @@ recipients = [
 # SHARED UTILITIES
 # ─────────────────────────────────────────────
 
-from newspaper import Article
+from newspaper import Article, Config
 from groq import Groq
+from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
 
 client = Groq(api_key=GROQ_API_KEY)
 today_date = datetime.today().date()
 
+# Common tracking/session params that should be stripped before fetching
+_TRACKING_PARAMS = {
+    "msockid", "utm_source", "utm_medium", "utm_campaign", "utm_term",
+    "utm_content", "fbclid", "gclid", "mc_cid", "mc_eid", "ref", "referer",
+    "_hsenc", "_hsmi", "hsctaTracking", "mkt_tok", "yclid",
+}
+
+# Mimic a real browser so sites like Fox News don't block the request
+NEWSPAPER_CONFIG = Config()
+NEWSPAPER_CONFIG.browser_user_agent = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
+NEWSPAPER_CONFIG.request_timeout = 15
+
+
+def clean_url(url: str) -> str:
+    """Strip known tracking query parameters from a URL."""
+    parsed = urlparse(url)
+    params = parse_qs(parsed.query, keep_blank_values=True)
+    filtered = {k: v for k, v in params.items() if k.lower() not in _TRACKING_PARAMS}
+    clean_query = urlencode(filtered, doseq=True)
+    cleaned = urlunparse(parsed._replace(query=clean_query))
+    if cleaned != url:
+        print(f"  🧹 Stripped tracking params: {url} → {cleaned}")
+    return cleaned
+
 
 def get_article_text(url):
+    url = clean_url(url)
     try:
-        article = Article(url)
+        article = Article(url, config=NEWSPAPER_CONFIG)
         article.download()
         article.parse()
+        if not article.text:
+            print(f"  ⚠️ Parsed empty body for {url}")
+            return None
         return article
     except Exception as e:
-        print(f"⚠️ Failed to fetch {url}: {e}")
+        print(f"  ⚠️ Failed to fetch {url}: {e}")
         return None
 
 
@@ -53,17 +86,74 @@ def clean_article_text(text, max_chars=6000):
     return text[:max_chars]
 
 
-def get_better_image(url, rss_image):
-    try:
-        if rss_image and ".webp" in rss_image.lower():
-            a = Article(url)
-            a.download()
-            a.parse()
-            if a.top_image and ".webp" not in a.top_image.lower():
-                return a.top_image
-        return rss_image
-    except:
-        return rss_image
+# URL substrings common in ad networks, trackers, and CDN resize/placeholder images
+_AD_IMAGE_PATTERNS = [
+    "doubleclick", "googlesyndication", "adservice", "adnxs", "moatads",
+    "scorecardresearch", "pixel.", "/pixel?", "beacon.", "tracking.",
+    "taboola", "outbrain", "revcontent", "mgid", "sharethrough",
+    "placeholder", "blank.gif", "spacer.gif", "1x1", "transparent.png",
+    "/ads/", "/ad/", "advertisement",
+]
+
+# Image file extensions that won't render reliably in email clients
+_BAD_EXTENSIONS = (".webp", ".svg", ".gif")
+
+
+def _is_valid_image_url(img_url: str) -> bool:
+    """Return False if the image URL looks like an ad, tracker, or unsupported format."""
+    if not img_url:
+        return False
+    lower = img_url.lower()
+    if any(lower.endswith(ext) for ext in _BAD_EXTENSIONS):
+        return False
+    if any(pattern in lower for pattern in _AD_IMAGE_PATTERNS):
+        return False
+    return True
+
+
+def extract_best_image(article_obj, rss_image: str = "") -> str:
+    """
+    Pick the best hero image for an article in priority order:
+      1. og:image / twitter:image meta tag  — explicitly set by the publisher
+      2. RSS feed image (if valid)
+      3. newspaper3k top_image              — heuristic fallback
+      4. Empty string                       — no usable image found
+
+    Each candidate is checked by _is_valid_image_url before being accepted.
+    """
+    candidates = []
+
+    # 1. Open Graph / Twitter Card (most trustworthy — set by the publisher)
+    if article_obj:
+        meta_img = getattr(article_obj, "meta_img", "") or ""
+        if meta_img:
+            candidates.append(("og/twitter meta", meta_img))
+
+        meta_data = getattr(article_obj, "meta_data", {})
+        og_image = (
+            meta_data.get("og", {}).get("image", "")
+            or meta_data.get("twitter", {}).get("image", "")
+        )
+        if og_image and isinstance(og_image, str):
+            candidates.append(("og meta_data", og_image))
+
+    # 2. RSS feed image
+    if rss_image:
+        candidates.append(("rss feed", rss_image))
+
+    # 3. newspaper3k heuristic top_image (least reliable — last resort)
+    if article_obj:
+        top_img = getattr(article_obj, "top_image", "") or ""
+        if top_img:
+            candidates.append(("top_image heuristic", top_img))
+
+    for source, url in candidates:
+        if _is_valid_image_url(url):
+            print(f"  🖼️  Image selected from [{source}]: {url}")
+            return url
+
+    print("  🖼️  No valid image found — article will render without one.")
+    return ""
 
 
 def summarize_with_llama(article_text):
@@ -177,7 +267,7 @@ def run_daily_rss_feed():
         if not parsed:
             continue
         cleaned_text = clean_article_text(parsed.text)
-        img_url = get_better_image(item['link'], item['image'])
+        img_url = extract_best_image(parsed, rss_image=item['image'])
         processed_articles.append({
             "title": item["title"],
             "link": item["link"],
@@ -375,9 +465,7 @@ def process_url_batch(urls):
             continue
 
         # Image
-        image = parsed.top_image or ""
-        if image and ".webp" in image.lower():
-            image = ""  # drop webp images that won't render in email
+        image = extract_best_image(parsed)
 
         processed_articles.append({
             "title": title,
