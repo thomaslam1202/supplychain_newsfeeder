@@ -262,7 +262,7 @@ def summarize_with_llama(article_text, retries =3):
                                 temperature=0.5,
                                 max_tokens=1000
                             )
-            return completion.choices[0].message.content
+                return completion.choices[0].message.content
         except RateLimitError:
             print("Reached rate limit - waiting 60s")
             time.sleep(60)
