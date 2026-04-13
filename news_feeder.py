@@ -605,7 +605,7 @@ def fetch_all_trigger_urls() -> list[str]:
     finally:
         try:
             mail.logout()
-        except 
+        except:
             pass
     except Exception as e:
         print(f"❌ IMAP error: {e}")
