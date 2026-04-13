@@ -5,7 +5,7 @@ import imaplib
 import email
 import time
 from email.header import decode_header
-from datetime import datetime
+from datetime import date
 from dotenv import load_dotenv
 from groq import RateLimitError
 
