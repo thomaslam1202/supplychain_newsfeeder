@@ -238,7 +238,7 @@ def get_source_info(url: str) -> tuple:
  
  
 def summarize_with_llama(article_text, retries =3):
-    for attemp in range(retries):
+    for attempt in range(retries):
         try: 
             completion = client.chat.completions.create(
                     model="llama-3.1-8b-instant",
@@ -267,7 +267,8 @@ def summarize_with_llama(article_text, retries =3):
         except RateLimitError:
             print("Reached rate limit - waiting 60s")
             time.sleep(60)
-    return print("Summary unavailable")
+    print("Summary unavailable")        
+    return None
  
 def _try_parse(raw: str):
     """Parse a raw date string into a datetime, or return None."""
