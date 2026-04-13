@@ -3,9 +3,11 @@ import os
 import re
 import imaplib
 import email
+import time
 from email.header import decode_header
 from datetime import datetime
 from dotenv import load_dotenv
+from groq import RateLimitError
 
 load_dotenv()
 
@@ -34,7 +36,7 @@ from groq import Groq
 from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
  
 client = Groq(api_key=GROQ_API_KEY)
-today_date = datetime.today().date()
+
  
 _TRACKING_PARAMS = {
     "msockid", "utm_source", "utm_medium", "utm_campaign", "utm_term",
@@ -235,33 +237,36 @@ def get_source_info(url: str) -> tuple:
     return (name, favicon)
  
  
-def summarize_with_llama(article_text):
-    completion = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
-        messages=[
-            {"role": "system", "content": """You are a professional Supply Chain Analyst.
-Summarize the article into 3 bullet points.
- 
-RULES:
-1. Output ONLY the bullet points.
-2. NO introduction (do not say "Here are the points").
-3. NO markdown bolding (do not use **).
-4. Start each point with a relevant Emoji icon based on the topic.
-5. Focus on business impact, risks, and trends
-6. Format the [Topic Title] and [Key Figures/Words] using <b> tags
- 
-Example format:
-📦 <b>Market Volatility</b>: Spot rates have surged by <b>52%</b> this quarter.
-⚠️ <b>Labor Risks</b>: Negotiations could impact <b>20,000 workers</b>.
-📈 <b>Strategic Trends</b>: Shippers are moving toward <b>short-term contracts</b>."""},
-            {"role": "user", "content": article_text}
-        ],
-        temperature=0.5,
-        max_tokens=1000
-    )
-    return completion.choices[0].message.content
- 
- 
+def summarize_with_llama(article_text, retries =3):
+    for attemp in range(retries):
+        try: completion = client.chat.completions.create(
+                    model="llama-3.1-8b-instant",
+                    messages=[
+                        {"role": "system", "content": """You are a professional Supply Chain Analyst.
+                        Summarize the article into 3 bullet points.
+                        
+                        RULES:
+                        1. Output ONLY the bullet points.
+                        2. NO introduction (do not say "Here are the points").
+                        3. NO markdown bolding (do not use **).
+                        4. Start each point with a relevant Emoji icon based on the topic.
+                        5. Focus on business impact, risks, and trends
+                        6. Format the [Topic Title] and [Key Figures/Words] using <b> tags
+                        
+                        Example format:
+                        📦 <b>Market Volatility</b>: Spot rates have surged by <b>52%</b> this quarter.
+                        ⚠️ <b>Labor Risks</b>: Negotiations could impact <b>20,000 workers</b>.
+                        📈 <b>Strategic Trends</b>: Shippers are moving toward <b>short-term contracts</b>."""},
+                                    {"role": "user", "content": article_text}
+                                ],
+                                temperature=0.5,
+                                max_tokens=1000
+                            )
+            return completion.choices[0].message.content
+        except RateLimitError:
+            print("Reached rate limit - waiting 60s")
+            time.sleep(60)
+    return print("Summary unavailable")
  
 def _try_parse(raw: str):
     """Parse a raw date string into a datetime, or return None."""
@@ -425,6 +430,7 @@ from email.mime.text import MIMEText
  
  
 def send_gmail_newsletter(html_content, recipient_list, subject=None):
+    today_date = date.today()
     sender_email = GMAIL_ADDRESS
     app_password = GMAIL_APP_PASSWORD
     subject = subject or f"[{today_date}] Daily Supply Chain Feed"
@@ -595,9 +601,11 @@ def fetch_all_trigger_urls() -> list[str]:
 
                 # Mark as read regardless
                 mail.store(eid, "+FLAGS", "\\Seen")
-
-        mail.logout()
-
+    finally:
+        try:
+            mail.logout()
+        except 
+            pass
     except Exception as e:
         print(f"❌ IMAP error: {e}")
 
@@ -606,6 +614,7 @@ def fetch_all_trigger_urls() -> list[str]:
 
 def process_url_batch(urls: list[str]):
     """Fetch, summarise, and send ONE combined email for all provided URLs."""
+    today_date = date.today()
     processed_articles = []
  
     for url in urls:
