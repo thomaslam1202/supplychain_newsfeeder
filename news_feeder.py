@@ -602,13 +602,13 @@ def fetch_all_trigger_urls() -> list[str]:
 
                 # Mark as read regardless
                 mail.store(eid, "+FLAGS", "\\Seen")
+    except Exception as e:
+        print(f"❌ IMAP error: {e}")            
     finally:
         try:
             mail.logout()
         except:
             pass
-    except Exception as e:
-        print(f"❌ IMAP error: {e}")
 
     return all_urls
 
