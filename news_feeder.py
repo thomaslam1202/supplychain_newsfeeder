@@ -239,7 +239,8 @@ def get_source_info(url: str) -> tuple:
  
 def summarize_with_llama(article_text, retries =3):
     for attemp in range(retries):
-        try: completion = client.chat.completions.create(
+        try: 
+            completion = client.chat.completions.create(
                     model="llama-3.1-8b-instant",
                     messages=[
                         {"role": "system", "content": """You are a professional Supply Chain Analyst.
