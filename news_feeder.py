@@ -17,7 +17,7 @@ GMAIL_APP_PASSWORD = os.getenv('GMAIL_APP_PASSWORD')
 
 # ── Now supports multiple trusted senders ──────────────────────────────────
 TRUSTED_SENDERS = [
-    'chunting.lam@kautex.com','joshua.baker@kautex.com','adrian.jimenez@kautex.com','Tony.Kizzee@kautex.com'
+    'chunting.lam@kautex.com','joshua.baker@kautex.com','adrian.jimenez@kautex.com','Tony.Kizzee@kautex.com', 'steve.phillips@kautex.com','jinnifer.cox@kautex.com'
 ]
 #only trigger if sender in trusted_senders with subjet = 'send' and has new url in email body
 
@@ -29,6 +29,9 @@ recipients = [
     'joshua.baker@kautex.com',
     'quinn.labay@kautex.com',
     'adrian.jimenez@kautex.com',
+    'steve.phillips@kautex.com',
+    'Tony.Kizzee@kautex.com',
+    'jinnifer.cox@kautex.com'
 ]
  
 from newspaper import Article, Config
