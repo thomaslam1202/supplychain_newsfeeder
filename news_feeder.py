@@ -244,7 +244,7 @@ def summarize_with_llama(article_text, retries =3):
     for attempt in range(retries):
         try: 
             completion = client.chat.completions.create(
-                    model="llama-3.1-8b-instant",
+                    model="llama-3.3-70b-versatile",
                     messages=[
                         {"role": "system", "content": """You are a professional Supply Chain Analyst.
                         Summarize the article into 3 bullet points.
@@ -680,5 +680,4 @@ def run_on_demand_trigger():
 # ─────────────────────────────────────────────
  
 if __name__ == "__main__":
-    run_daily_rss_feed()
     run_on_demand_trigger()
