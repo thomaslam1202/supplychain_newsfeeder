@@ -465,7 +465,10 @@ def run_daily_rss_feed():
     selected_articles = []
  
     for entry in feed.entries:
-        date_str = getattr(entry, 'published', 'No date provided')
+        raw_date = getattr(entry, 'published', '')
+        parsed_date = _try_parse(raw_date)
+        date_str = parsed_date.strftime("%B %d, %Y") if parsed_date else "Unknown date"
+        
         selected_articles.append({
             "title": entry.title,
             "link":  entry.link,
@@ -524,7 +527,7 @@ def _is_article_url(url: str) -> bool:
     domain = parsed.netloc.lower().lstrip("www.")
     if any(domain == b or domain.endswith("." + b) for b in _SIGNATURE_DOMAIN_BLOCKLIST):
         return False
-    path_segments = [s for s in parsed.path.strip("/").split("/") if len(s) >= 3]
+    path_segments = [s for s in parsed.path.strip("/").split("/") if len(s) >= 1]
     return len(path_segments) >= 2
  
  
@@ -656,7 +659,7 @@ def process_url_batch(urls: list[str]):
     email_body = generate_email_html(processed_articles)
     subject    = f"[{today_date}] On-Demand Supply Chain Summary"
     print(f"\n📧 Sending one combined email with {len(processed_articles)} article(s)...")
-    send_gmail_newsletter(email_body, recipients, subject=subject)
+    send_gmail_newsletter(email_body, 'chunting.lam@kautex.com', subject=subject)
 
 
 def run_on_demand_trigger():
