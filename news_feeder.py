@@ -255,12 +255,12 @@ def summarize_with_llama(article_text, retries =3):
                         3. NO markdown bolding (do not use **).
                         4. Start each point with a relevant Emoji icon based on the topic.
                         5. Focus on business impact, risks, and trends
-                        6. Format the [Topic Title] and [Key Figures/Words] using <b> tags
+                        6. Format the [Topic Title] using <b> tags
                         
                         Example format:
-                        📦 <b>Market Volatility</b>: Spot rates have surged by <b>52%</b> this quarter.
-                        ⚠️ <b>Labor Risks</b>: Negotiations could impact <b>20,000 workers</b>.
-                        📈 <b>Strategic Trends</b>: Shippers are moving toward <b>short-term contracts</b>."""},
+                        📦 <b>Market Volatility</b>: Spot rates have surged by 52% this quarter.
+                        ⚠️ <b>Labor Risks</b>: Negotiations could impact 20,000 workers.
+                        📈 <b>Strategic Trends</b>: Shippers are moving toward short-term contracts."""},
                                     {"role": "user", "content": article_text}
                                 ],
                                 temperature=0.5,
