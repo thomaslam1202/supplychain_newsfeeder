@@ -528,7 +528,7 @@ def _is_article_url(url: str) -> bool:
     if any(domain == b or domain.endswith("." + b) for b in _SIGNATURE_DOMAIN_BLOCKLIST):
         return False
     path_segments = [s for s in parsed.path.strip("/").split("/") if len(s) >= 1]
-    return len(path_segments) >= 2
+    return len(path_segments) >= 1
  
  
 def extract_urls_from_text(text: str):
