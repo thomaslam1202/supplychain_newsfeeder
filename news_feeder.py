@@ -503,7 +503,7 @@ def run_daily_rss_feed():
     with open("preview.html", "w", encoding="utf-8") as f:
         f.write(email_body)
  
-    send_gmail_newsletter(email_body, recipients)
+    send_gmail_newsletter(email_body, 'chunting.lam@kautex.com')
  
  
 # ─────────────────────────────────────────────
@@ -683,4 +683,5 @@ def run_on_demand_trigger():
 # ─────────────────────────────────────────────
  
 if __name__ == "__main__":
+    run_daily_rss_feed()
     run_on_demand_trigger()
