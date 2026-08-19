@@ -244,7 +244,7 @@ def summarize_with_llama(article_text, retries =3):
     for attempt in range(retries):
         try: 
             completion = client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
+                    model="openai/gpt-oss-120b",
                     messages=[
                         {"role": "system", "content": """You are a professional Supply Chain Analyst.
                         Summarize the article into 3 bullet points.
